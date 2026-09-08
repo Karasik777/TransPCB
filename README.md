@@ -13,7 +13,7 @@ live on a board while KiCad DRC reported **zero errors**.
 
 ## What you get
 
-- **6 Claude skills** — from-scratch design, routing, verification, optimisation,
+- **7 Claude skills** — from-scratch design, routing, verification, optimisation,
   fab output, and the constraint system that ties them together
 - **A constraint spec** — fab limits, net classes, differential pairs, via
   budgets, impedance targets, RF keepouts — declared once, pushed down to the
@@ -25,6 +25,9 @@ live on a board while KiCad DRC reported **zero errors**.
 - **A placement critic** that reads your netlist and scores decoupling distance,
   decap ordering, connector edge access, crystal proximity and keepouts — with
   thresholds that tighten by frequency band
+- **A placement optimiser** — simulated annealing against a tunable cost
+  function. On the example board it cut copper 772→665 mm and vias 92→39
+  against a hand-tuned layout
 - **Current-aware track widths** (IPC-2221) and a stackup gate, so an impedance
   target either uses your real stack or refuses to run
 - **A fab package** gated on clean DRC — gerbers, drill, BOM, JLCPCB CPL
@@ -96,6 +99,7 @@ scripts/
   apply_constraints.py spec -> KiCad rules + router flags + IPC-2221 widths
   verify.py            net sync, keepouts, pair skew, DFM, planes, rule drift
   place_rules.py       placement critic, band-aware EE guidelines
+  place_optimise.py    simulated-annealing placement refinement
   probe_footprint.py   pad axis, origin, courtyard, mating face — before placing
   fill_zones.py        headless zone fill (kicad-cli has none)
   fab_package.py       gerbers/drill/BOM/CPL, gated on clean DRC
