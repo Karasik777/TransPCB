@@ -22,6 +22,41 @@ def load(p):
     return yaml.safe_load(open(p))
 
 
+def ipc2221_width_mm(current_a: float, temp_rise_c: float, copper_oz: float,
+                     external: bool = True) -> float:
+    """Minimum track width for a current, per IPC-2221.
+
+        A_mils2 = (I / (k * dT^b)) ** (1/c)
+        width   = A / (thickness_in_mils)
+
+    k = 0.048 external, 0.024 internal (internal traces cool worse).
+    """
+    k = 0.048 if external else 0.024
+    b, c = 0.44, 0.725
+    area_mils2 = (current_a / (k * (temp_rise_c ** b))) ** (1 / c)
+    thickness_mils = copper_oz * 1.378
+    return round(area_mils2 / thickness_mils * 0.0254, 3)
+
+
+def resolve_widths(spec: dict) -> dict:
+    """Net class -> track width, deriving from current where given."""
+    st = spec.get('stackup', {})
+    oz = st.get('copper_oz', 1.0)
+    out = {}
+    for name, nc in (spec.get('net_classes') or {}).items():
+        w = nc.get('track_mm')
+        if nc.get('current_a'):
+            dt = nc.get('max_temp_rise_c', 10)
+            need = ipc2221_width_mm(nc['current_a'], dt, oz)
+            if w is None or need > w:
+                out[name] = {'width': need, 'why': f"IPC-2221: {nc['current_a']}A at dT={dt}C on {oz}oz"}
+                continue
+            out[name] = {'width': w, 'why': f"declared (IPC-2221 needs only {need} mm)"}
+        elif w:
+            out[name] = {'width': w, 'why': 'declared'}
+    return out
+
+
 def validate(spec: dict) -> list[str]:
     """Fab floors are hard limits; anything below them is unmanufacturable."""
     errs = []
@@ -41,6 +76,16 @@ def validate(spec: dict) -> list[str]:
     for dp in spec.get('diff_pairs', []):
         if dp['gap_mm'] < fab['min_clearance_mm']:
             errs.append(f"diff pair {dp['name']} gap {dp['gap_mm']} < clearance floor")
+        # Impedance without a stackup silently uses KiCad defaults - refuse it.
+        if dp.get('impedance_ohm') and not spec.get('stackup'):
+            errs.append(f"diff pair {dp['name']} sets impedance_ohm={dp['impedance_ohm']} but no "
+                        f"stackup: block is defined. Width would be derived from KiCad defaults, "
+                        f"not your fab's stack. Add stackup: or drop impedance_ohm.")
+    # Current-derived widths must still clear the fab floor.
+    for name, r in resolve_widths(spec).items():
+        if r['width'] < fab['min_track_mm']:
+            errs.append(f"net_class {name} needs {r['width']} mm ({r['why']}) "
+                        f"but fab floor is {fab['min_track_mm']} mm")
     return errs
 
 
@@ -88,10 +133,15 @@ def router_flags(spec: dict, stage: str = 'single') -> list[str]:
         if dp.get('impedance_ohm'):
             f += ['--impedance', str(dp['impedance_ohm'])]
     else:
-        power = [n for nc in spec.get('net_classes', {}).values()
-                 if nc.get('track_mm', 0) > d['track_mm'] for n in nc['nets']]
+        widths = resolve_widths(spec)
+        power, pw = [], []
+        for name, nc in (spec.get('net_classes') or {}).items():
+            w = widths.get(name, {}).get('width', 0)
+            if w > d['track_mm']:
+                for n in nc['nets']:
+                    power.append(n); pw.append(str(w))
         if power:
-            f += ['--power-nets'] + power
+            f += ['--power-nets'] + power + ['--power-nets-widths'] + pw
     return f
 
 
@@ -102,6 +152,7 @@ def main():
     ap.add_argument('--router-flags', action='store_true')
     ap.add_argument('--stage', default='single', choices=['single', 'diff'])
     ap.add_argument('--lock', help='write a rules snapshot for drift detection')
+    ap.add_argument('--widths', action='store_true', help='show resolved net-class widths')
     a = ap.parse_args()
     spec = load(a.spec)
 
@@ -122,6 +173,9 @@ def main():
         pro = json.load(open(a.project or a.lock.replace('.lock.json', '.kicad_pro')))
         json.dump(pro['board']['design_settings']['rules'], open(a.lock, 'w'), indent=2, sort_keys=True)
         print(f'locked rules snapshot -> {a.lock}')
+    if a.widths:
+        for name, r in resolve_widths(spec).items():
+            print(f'  {name:10} {r["width"]:.3f} mm   {r["why"]}')
     if a.router_flags:
         print(' '.join(router_flags(spec, a.stage)))
 

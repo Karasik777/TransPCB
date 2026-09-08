@@ -23,6 +23,17 @@ fab:
   min_edge_clearance_mm: 0.50
   min_silk_height_mm: 0.80
 
+# Physical stack. REQUIRED if any diff pair declares impedance_ohm - without it
+# the router derives width from KiCad defaults that will not match your fab.
+# JLCPCB 2-layer 1.6mm: 0.2mm prepreg is not used; core is the full 1.53mm.
+stackup:
+  layers: 2
+  thickness_mm: 1.6
+  copper_oz: 1.0              # 1 oz = 0.0348 mm finished
+  dielectric:
+    core_mm: 1.53
+    epsilon_r: 4.5            # FR-4 typical at 1 MHz; ask your fab for the real figure
+
 defaults:
   track_mm: 0.25
   clearance_mm: 0.15
@@ -41,7 +52,11 @@ budgets:
 net_classes:
   power:
     nets: ["VBUS", "+3V3"]
+    # Give EITHER a width OR a current - current derives width per IPC-2221
+    # and overrides track_mm if both are present.
+    current_a: 0.5
     track_mm: 0.40
+    max_temp_rise_c: 10
   signal:
     nets: ["IO*", "CC*", "EN", "LED_*", "PWR_LED"]
     track_mm: 0.25

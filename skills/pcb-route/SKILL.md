@@ -14,7 +14,8 @@ left one net split and two dangling stubs where the Rust router left none.
 ## Before touching the board
 
 ```bash
-./scripts/preflight.sh BOARD.kicad_pcb     # ABORTS on the KiCad segfault state
+./scripts/preflight.sh BOARD.kicad_pcb --close   # aborts on the segfault state;
+                                                 # --close kills a stale pcbnew
 git add -A && git commit -m "pre-route checkpoint"
 python scripts/apply_constraints.py constraints.yaml --project BOARD.kicad_pro --lock rules.lock.json
 ```
@@ -71,7 +72,7 @@ The Rust router has two known defects. Check both, every time:
   honoured on B.Cu and ignored on F.Cu.
 - Refill after any copper change, or DRC reports hundreds of phantom clearance
   errors from stale fill polygons tracing the *old* routing.
-  Refill needs KiCad: `pcb_refill_zones` over MCP, or `B` in the GUI.
+  Refill headlessly - no GUI, no MCP:  `python scripts/fill_zones.py BOARD.kicad_pcb`
 
 ## Recording a run
 

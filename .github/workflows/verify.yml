@@ -8,6 +8,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install shapely scipy numpy pyyaml
+      - name: IPC-2221 width sanity
+        run: python -c "import sys;sys.path.insert(0,'scripts');from apply_constraints import ipc2221_width_mm as w;assert abs(w(1,10,1.0)-0.300)<0.02, w(1,10,1.0);print('1A -> 0.30mm ok')"
       - name: constraint spec validates
         run: python scripts/apply_constraints.py constraints/example.yaml --router-flags
       - name: board checks (net-sync needs kicad-cli, skipped here)

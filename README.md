@@ -13,8 +13,8 @@ live on a board while KiCad DRC reported **zero errors**.
 
 ## What you get
 
-- **5 Claude skills** — from-scratch design, routing, verification, optimisation,
-  and the constraint system that ties them together
+- **6 Claude skills** — from-scratch design, routing, verification, optimisation,
+  fab output, and the constraint system that ties them together
 - **A constraint spec** — fab limits, net classes, differential pairs, via
   budgets, impedance targets, RF keepouts — declared once, pushed down to the
   autorouter, KiCad's rules, and the verifier
@@ -22,6 +22,12 @@ live on a board while KiCad DRC reported **zero errors**.
   drift, copper in RF keepouts, pair skew and via asymmetry, drill/annular DFM,
   missing ground planes, design-rule tampering
 - **A crash guard** for a KiCad 10.0.5 segfault that kills the app mid-session
+- **A placement critic** that reads your netlist and scores decoupling distance,
+  decap ordering, connector edge access, crystal proximity and keepouts — with
+  thresholds that tighten by frequency band
+- **Current-aware track widths** (IPC-2221) and a stackup gate, so an impedance
+  target either uses your real stack or refuses to run
+- **A fab package** gated on clean DRC — gerbers, drill, BOM, JLCPCB CPL
 - **A worked example** — ESP32-C3 dev board, with its routing animation
 
 ## Install
@@ -85,7 +91,15 @@ zones, so the workflow repairs both after every run — see
 
 ```
 skills/       Claude skills — the automation surface
-scripts/      kicad_sexp.py, verify.py, apply_constraints.py, preflight.sh
+scripts/
+  kicad_sexp.py        s-expression reader/writer everything else builds on
+  apply_constraints.py spec -> KiCad rules + router flags + IPC-2221 widths
+  verify.py            net sync, keepouts, pair skew, DFM, planes, rule drift
+  place_rules.py       placement critic, band-aware EE guidelines
+  probe_footprint.py   pad axis, origin, courtyard, mating face — before placing
+  fill_zones.py        headless zone fill (kicad-cli has none)
+  fab_package.py       gerbers/drill/BOM/CPL, gated on clean DRC
+  preflight.sh         crash guard + stale-buffer guard
 constraints/  the spec schema, documented inline
 docs/         MCP setup, gotchas, workflow
 setup/        pinned installer, versions.lock

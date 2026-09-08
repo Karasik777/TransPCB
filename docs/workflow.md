@@ -51,3 +51,33 @@ run - both routers and an open pcbnew have each destroyed a full pass.
   does not, and each has been a live defect while DRC reported zero errors
 - A tradeoff presented as a win - fewer vias usually means more copper, and both
   numbers get reported
+
+## The full pipeline, scripted
+
+Every stage is now headless — no GUI step anywhere:
+
+```bash
+B=board.kicad_pcb; S=board.kicad_sch; C=constraints.yaml
+
+./scripts/preflight.sh $B --close                       # guard, close stale pcbnew
+python scripts/apply_constraints.py $C --project board.kicad_pro --lock rules.lock.json
+python scripts/probe_footprint.py LIB:FP                # before placing anything new
+python scripts/place_rules.py $B --sch $S --spec $C --band hf   # iterate to a pass
+#   ... route (see pcb-route) ...
+python scripts/fill_zones.py $B                         # never skip after routing
+python scripts/verify.py $B --spec $C --sch $S --project board.kicad_pro --lock rules.lock.json
+python scripts/fab_package.py $B --sch $S --out fab/ --vendor jlcpcb
+```
+
+## Frequency bands
+
+`place_rules.py --band` sets how tight the placement rules are:
+
+| Band | Decoupling | Bulk | Crystal | Use for |
+|---|---|---|---|---|
+| `lf` | 10 mm | 25 mm | 15 mm | DC, analog, slow logic |
+| `hf` | 5 mm | 20 mm | 10 mm | digital, edges under ~100 MHz |
+| `rf` | 2.5 mm | 15 mm | 5 mm | RF, fast edges, anything with an antenna |
+
+The same board scored 75/100 at `lf` and 50/100 at `rf`. Pick the band that
+matches your fastest edge rate, not your clock frequency.

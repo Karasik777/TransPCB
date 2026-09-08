@@ -39,8 +39,15 @@ run_erc      # must be 0 before placement
 
 ## 3. Placement
 
-Read the footprint geometry before you place. Assumptions that have cost a
-re-place:
+**Probe every unfamiliar footprint before placing it:**
+
+```bash
+python scripts/probe_footprint.py Connector_USB:USB_C_Receptacle_GCT_USB4085
+```
+
+It reports pad axis, origin, courtyard extent, drill sizes, declared keepouts,
+and which way a connector's mating face points. Each of the assumptions below
+cost a re-place and is exactly what the probe prints:
 
 - **Header pin origin is pin 1, not the centre.** `PinHeader_*_Vertical` pads run
   along **Y**; `rot=0` is a vertical column, `rot=90` lays it flat.
@@ -62,10 +69,18 @@ to one crosser.
 
 Verify placement before routing:
 
-```
+```bash
 kicad-cli pcb drc ...      # courtyard overlaps, edge clearance, hole-to-hole
+python scripts/place_rules.py BOARD.kicad_pcb --sch BOARD.kicad_sch \
+       --spec constraints.yaml --band hf     # decoupling, connectors, crystals
 python scripts/verify.py BOARD.kicad_pcb --spec constraints.yaml --sch BOARD.kicad_sch
 ```
+
+`place_rules.py` is a critic, not a placer: it reads the netlist to learn what
+each part does, then scores decoupling distance, decap ordering (smallest cap
+nearest the pin), connector edge access, crystal proximity, regulator output
+caps, and keepout intrusion. Thresholds tighten with `--band lf|hf|rf`. Iterate
+until it passes, then route.
 
 Expect unconnected items at this stage - nothing is routed yet.
 

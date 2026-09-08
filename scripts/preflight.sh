@@ -5,7 +5,14 @@
 #
 # Exit 0 = safe. Exit 1 = abort, with the reason on stderr.
 set -uo pipefail
-BOARD="${1:-}"
+BOARD=""
+CLOSE=0
+for arg in "$@"; do
+  case "$arg" in
+    --close) CLOSE=1 ;;
+    *) BOARD="$arg" ;;
+  esac
+done
 fail() { echo "PREFLIGHT ABORT: $*" >&2; exit 1; }
 warn() { echo "PREFLIGHT WARN:  $*" >&2; }
 
@@ -31,9 +38,18 @@ if [ -n "$BOARD" ] && [ -f "$BOARD" ] && [ "$FOUND_BOARD_EDITOR" = "1" ]; then
     STARTED=$(stat -c %Y "/proc/$pid" 2>/dev/null) || continue
     MODIFIED=$(stat -c %Y "$BOARD" 2>/dev/null) || continue
     if [ "$MODIFIED" -gt "$STARTED" ]; then
-      warn "$BOARD changed on disk after pcbnew (PID $pid) opened it.
-       That window holds a stale buffer - saving from it will discard those changes.
-       Close it, or File > Revert, before continuing."
+      if [ "$CLOSE" = "1" ]; then
+        echo "closing stale pcbnew (PID $pid) - it opened $BOARD before the file changed" >&2
+        kill "$pid" 2>/dev/null || true
+        for _ in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+        kill -0 "$pid" 2>/dev/null && fail "PID $pid would not close - close it by hand"
+        rm -f "$(dirname "$BOARD")"/~*.lck
+        echo "closed" >&2
+      else
+        fail "$BOARD changed on disk after pcbnew (PID $pid) opened it.
+       That window holds a stale buffer - saving from it WILL discard those changes.
+       Re-run with --close to close it automatically, or File > Revert in KiCad."
+      fi
     fi
   done
 fi
