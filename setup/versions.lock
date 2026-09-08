@@ -1,0 +1,6 @@
+# Versions validated together. Change deliberately, not incidentally.
+kicad                     10.0.5
+kicad-mcp-pro             3.34.0     # MIT, github.com/oaslananka/kicad-mcp-pro
+KiCadRoutingTools         main       # MIT, github.com/drandyhaas/KiCadRoutingTools
+freerouting (container)   2.1.0      # GPL, ghcr.io/freerouting/freerouting
+python deps               shapely>=2.1 scipy numpy pillow pyyaml

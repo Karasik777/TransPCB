@@ -1,0 +1,9 @@
+output/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.history/
+~*.lck
+*_routetrace.json
+*.bak

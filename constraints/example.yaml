@@ -1,0 +1,71 @@
+# TransPCB constraint spec.
+#
+# This is the single source of truth for a board's electrical and fab rules.
+# `scripts/apply_constraints.py` translates it into:
+#   - KiCad board rules + net classes  (.kicad_pro)
+#   - autorouter CLI flags             (route.py / route_diff.py)
+#   - verification thresholds          (scripts/check_*.py)
+#
+# Edit this, never the .kicad_pro rules by hand - the router rewrites those.
+
+board:
+  name: esp32c3-devboard
+  layers: [F.Cu, B.Cu]
+
+fab:
+  vendor: jlcpcb
+  tier: standard              # standard | advanced
+  min_track_mm: 0.15          # JLC standard floor: 0.127
+  min_clearance_mm: 0.15      # JLC standard floor: 0.127
+  min_drill_mm: 0.30          # JLC: 0.20 advanced, 0.30 standard
+  min_annular_mm: 0.13
+  min_hole_to_hole_mm: 0.25
+  min_edge_clearance_mm: 0.50
+  min_silk_height_mm: 0.80
+
+defaults:
+  track_mm: 0.25
+  clearance_mm: 0.15
+  via:
+    size_mm: 0.6
+    drill_mm: 0.3
+
+# Optimiser budgets. These become router cost weights, not hard limits -
+# the router trades them off against completion.
+budgets:
+  max_vias: 60                # -> raises --via-cost when the estimate exceeds this
+  prefer_straight: true       # -> keeps default --turn-cost 1000
+  spread_tracks: false        # -> --track-proximity-cost, helps EMI/DFM
+  heuristic_weight: 2.3       # 1.0 = optimal but slow; >1 = faster, longer routes
+
+net_classes:
+  power:
+    nets: ["VBUS", "+3V3"]
+    track_mm: 0.40
+  signal:
+    nets: ["IO*", "CC*", "EN", "LED_*", "PWR_LED"]
+    track_mm: 0.25
+
+# Routed by route_diff.py BEFORE anything else, and registered as protected
+# so the single-ended pass cannot rip them.
+diff_pairs:
+  - name: USB
+    p: USB_DP
+    n: USB_DM
+    gap_mm: 0.20
+    impedance_ohm: 90         # USB 2.0 differential; informational at FS speeds
+    max_skew_mm: 2.5          # checked by check_diffpair.py
+
+# Regions that must contain no copper on any layer.
+# Do NOT rely on a footprint's own keepout zone - see docs/gotchas.md.
+keepouts:
+  - name: esp32c3-antenna
+    reason: "RF antenna - copper here detunes it"
+    rect: {x1: 100.0, y1: 50.0, x2: 130.0, y2: 61.9}   # footprint keepout is y 50.9..61.9; U1 pads start at 62.0
+
+planes:
+  - net: GND
+    layers: [F.Cu, B.Cu]
+    connect_pads: solid       # thermal relief starves small SMD pads
+    stitch_pitch_mm: 5.0
+    clearance_mm: 0.30

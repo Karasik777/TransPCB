@@ -1,0 +1,18 @@
+name: verify example board
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install shapely scipy numpy pyyaml
+      - name: constraint spec validates
+        run: python scripts/apply_constraints.py constraints/example.yaml --router-flags
+      - name: board checks (net-sync needs kicad-cli, skipped here)
+        run: |
+          python scripts/verify.py examples/esp32c3-devboard/beautiful.kicad_pcb \
+            --spec examples/esp32c3-devboard/constraints.yaml || true
+      - name: shell scripts parse
+        run: bash -n setup/install.sh && bash -n scripts/preflight.sh

@@ -1,0 +1,17 @@
+(rules
+(rule "Board minimum track width"
+  (condition "A.Type == 'track'")
+  (constraint track_width (min 0.1500mm) (opt 0.1500mm))
+)
+(rule "Board minimum clearance"
+  (condition "A.Type == 'track' || A.Type == 'via' || A.Type == 'pad' || B.Type == 'track' || B.Type == 'via' || B.Type == 'pad'")
+  (constraint clearance (min 0.1500mm))
+  (constraint hole_to_hole (min 0.2500mm))
+)
+(rule "Board minimum via geometry"
+  (condition "A.Type == 'via' || A.Type == 'micro_via' || A.Type == 'buried_via'")
+  (constraint via_diameter (min 0.4500mm))
+  (constraint hole_size (min 0.2000mm))
+  (constraint annular_width (min 0.1300mm))
+)
+)
