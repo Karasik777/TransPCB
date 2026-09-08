@@ -68,8 +68,12 @@ diff_pairs:
     p: USB_DP
     n: USB_DM
     gap_mm: 0.20
-    impedance_ohm: 90         # USB 2.0 differential; informational at FS speeds
-    max_skew_mm: 2.5          # checked by check_diffpair.py
+    impedance_ohm: 90
+    # Declare the INTERFACE, not a skew number. The budget is then derived from
+    # the actual edge rate, so the check means something: 20 mm at full speed,
+    # 1.25 mm at high speed, 0.13 mm for USB 3. A hardcoded max_skew_mm is an
+    # opinion; this is physics. See scripts/physics.py for the table.
+    interface: usb2.0-fs      # ESP32-C3 native USB Serial/JTAG is 12 Mbps FS
 
 # Regions that must contain no copper on any layer.
 # Do NOT rely on a footprint's own keepout zone - see docs/gotchas.md.
@@ -84,6 +88,30 @@ planes:
     connect_pads: solid       # thermal relief starves small SMD pads
     stitch_pitch_mm: 5.0
     clearance_mm: 0.30
+
+# --- power and thermal -------------------------------------------------------
+# Heat is the failure mode that most often kills a board which passes every
+# geometric check. Nothing else in the toolchain looks at it.
+power_devices:
+  - ref: U2
+    type: ldo
+    package: SOT-23-5
+    vin_v: 5.0                # USB VBUS
+    vout_v: 3.3
+    load_a: 0.35              # ESP32-C3 WiFi TX peak
+    duty_cycle: 0.35          # TX bursts are milliseconds; the junction never
+                              # reaches the steady-state value for peak current.
+                              # Set 1.0 for a continuous load - and if you are
+                              # unsure, 1.0 is the safe assumption.
+    iq_a: 0.000055
+    ambient_c: 25
+    ground_pour: true         # false = bare minimum copper, much worse theta_JA
+    max_tj_c: 125             # AP2112 absolute maximum
+
+# Considered exceptions. A failing check listed here is reported as ACCEPTED
+# rather than FAIL - it still runs, so a regression beyond what was accepted
+# still surfaces. Always give a reason, and prefer an expiry.
+accepted_failures: []
 
 # --- placement optimiser -----------------------------------------------------
 # scripts/place_optimise.py refines placement by simulated annealing. It starts

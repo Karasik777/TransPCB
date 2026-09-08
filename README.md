@@ -20,7 +20,11 @@ live on a board while KiCad DRC reported **zero errors**.
   autorouter, KiCad's rules, and the verifier
 - **A verification suite** that catches what DRC misses: board-vs-schematic net
   drift, copper in RF keepouts, pair skew and via asymmetry, drill/annular DFM,
-  missing ground planes, design-rule tampering
+  missing ground planes, design-rule tampering — and **thermal**, which found
+  the example board's regulator at 120 °C junction against a 125 °C limit
+- **Thresholds derived from physics, not constants.** Declare `interface:
+  usb2.0-fs` and the skew budget follows from the edge rate (20 mm), not from a
+  number somebody typed
 - **A crash guard** for a KiCad 10.0.5 segfault that kills the app mid-session
 - **A placement critic** that reads your netlist and scores decoupling distance,
   decap ordering, connector edge access, crystal proximity and keepouts — with
@@ -83,7 +87,7 @@ open pcbnew window have each silently destroyed a complete routing pass.
 | Routing violations | 1 unconnected, 2 dangling stubs | **0** |
 | Copper | 958.3 mm | **691.7 mm** |
 | Vias | **17** | 41 |
-| Runtime | minutes | **0.18 s** |
+| Runtime | **58 s** (`-mp 20`, measured) | **0.18 s** — ~320x faster |
 | Workflow | 2 manual GUI steps | none — reads `.kicad_pcb` |
 
 Rust A* is the default. It also rewrites your design rules and discards copper

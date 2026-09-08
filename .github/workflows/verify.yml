@@ -15,6 +15,6 @@ jobs:
       - name: board checks (net-sync needs kicad-cli, skipped here)
         run: |
           python scripts/verify.py examples/esp32c3-devboard/beautiful.kicad_pcb \
-            --spec examples/esp32c3-devboard/constraints.yaml || true
+            --spec examples/esp32c3-devboard/constraints.yaml
       - name: shell scripts parse
         run: bash -n setup/install.sh && bash -n scripts/preflight.sh

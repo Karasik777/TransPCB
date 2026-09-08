@@ -50,7 +50,7 @@ Worked example, one board, two routers:
 | Routing violations | 1 unconnected, 2 dangling | 0 |
 | Copper | 958.3 mm | 691.7 mm |
 | Vias | 17 | 41 |
-| Runtime | minutes | 0.18 s |
+| Runtime | 58 s (`-mp 20`, measured) | 0.18 s — ~320x faster |
 
 The Rust router won on completeness and copper, lost on vias, and needed its
 output repaired (rules rewritten, zones discarded). All three facts belong in

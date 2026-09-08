@@ -33,6 +33,17 @@ Exit 1 on any failure - suitable for CI or a pre-order gate. Then always also:
 kicad-cli pcb drc --format json --severity-error --output drc.json BOARD.kicad_pcb
 ```
 
+## Thresholds come from physics, not constants
+
+`max_skew_mm: 2.5` is an opinion. Declare the **interface** instead and the
+budget is derived from the real edge rate - 20 mm at USB full speed, 1.25 mm at
+high speed, 0.13 mm for USB 3. The same board then passes or fails for a reason
+you can state. `scripts/physics.py` holds the tables.
+
+The same applies to via symmetry: asymmetric vias convert differential to common
+mode, but only matters above ~100 Mbps. Below that the check reports it and
+passes, rather than failing on a rule that does not bite.
+
 ## The checks
 
 - **net-sync** - exports the schematic netlist and compares every `(ref, pin)`
@@ -48,6 +59,32 @@ kicad-cli pcb drc --format json --severity-error --output drc.json BOARD.kicad_p
   fail a 0.3 mm standard-tier order.
 - **plane** - a declared plane net must have a filled zone on each declared layer.
 - **rule-drift** - current `.kicad_pro` rules against a locked snapshot.
+- **thermal** - dissipation, package theta_JA, junction temperature against the
+  device limit, with an optional duty cycle for pulsed loads. Heat is the failure
+  mode that most often kills a board passing every geometric check, and nothing
+  else in the toolchain looks at it. On the example board it found the LDO at
+  120 degC junction on WiFi TX peaks against a 125 degC maximum - invisible to
+  DRC, invisible to the router, and the single biggest threat to that board
+  working.
+- **track-current** - the routed width of each current-rated net against
+  IPC-2221. `apply_constraints` computes the required width; this checks the
+  copper that actually got laid.
+
+## Accepted failures
+
+For genuine judgement calls, declare them in the spec:
+
+```yaml
+accepted_failures:
+  - check: diffpair:USB
+    reason: "why this is acceptable here"
+    expires: 2027-01-01
+```
+
+They report as **ACCEPTED**, not PASS - the check still runs, so a regression
+beyond what was accepted still surfaces, and an expiry forces re-review. Use
+this last: prefer fixing the threshold so it reflects physics, then fixing the
+board. An exception list that grows is a design going quietly wrong.
 
 ## Interpreting failures
 
