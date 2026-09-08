@@ -41,15 +41,29 @@ python ../../scripts/verify.py beautiful.kicad_pcb --spec constraints.yaml --sch
 (`KICAD_ROUTE_TRACE=1`), showing traces laid, ripped and restored. Open it in a
 browser; some image viewers show only the first frame.
 
-## Known state
+## State
 
-This board is a **teaching example, not a verified design.** `verify.py` fails
-two checks on it deliberately, and both are instructive:
+**0 DRC errors, 0 unconnected pads.** 5 of 6 TransPCB checks pass.
 
-- `keepout:esp32c3-antenna` - a +3V3 track at y=61.20 runs above the module's
-  pads, inside the antenna region. A real intrusion the autorouter introduced.
-- `diffpair:USB` - via count 0 vs 3 on D+/D-. Asymmetric vias convert
-  differential to common mode.
+Routed with the two-stage flow - `route_diff.py` for the USB pair first, then
+`route.py` for the rest. Pair skew: connector side 7.39 -> 3.26 mm, MCU side
+13.42 -> 5.16 mm against a single-ended first attempt.
 
-Neither breaks a 12 Mbps full-speed USB link, which is why they survived. Both
-would matter at high speed or in EMC testing. Fix them before ordering.
+A board-level `ANTENNA_KEEPOUT` zone (tracks, vias and pour not allowed) keeps
+the RF region clear - the router respects it, rather than the verifier catching
+intrusions afterwards. Its boundary is y=61.5 rather than the footprint's 61.9,
+because U1's own pads sit at y=62.0 and a 0.4 mm track reaching them spans
+61.8..62.2.
+
+### The one accepted failure
+
+`diffpair:USB` - `USB_DM` carries 3 vias to `USB_DP`'s 0. Asymmetric vias convert
+differential to common mode, the main radiated-emissions driver on USB. Every
+attempt to remove them was **rejected by the router's own improvement gate**:
+`USB_DM` has to reach TP4 and J3's second pad row, and that needs layer changes
+given this placement.
+
+Harmless at 12 Mbps full-speed, which is what the C3's native USB runs. It would
+matter at high speed or in EMC testing. Fixing it properly means moving TP4 and
+the ESD part, not re-routing - which is exactly the kind of problem
+`place_rules.py` and the placement optimiser are for.
