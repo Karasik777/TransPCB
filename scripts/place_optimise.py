@@ -72,12 +72,15 @@ class Layout:
         self.local = {}
         self.pos = {}
         self.extent = {}
+        self.side = {}
         for ref, f in self.fps.items():
             cx = sum(p['x'] for p in f['pads']) / len(f['pads']) if f['pads'] else f['x']
             cy = sum(p['y'] for p in f['pads']) / len(f['pads']) if f['pads'] else f['y']
             self.pos[ref] = (cx, cy)
             self.local[ref] = [(p['num'], p['x'] - cx, p['y'] - cy, p['r'],
                                 self.pin2net.get((ref, p['num']))) for p in f['pads']]
+            m = re.search(r'\(layer "([^"]+)"\)', board_text[f['start']:f['end'] + 1])
+            self.side[ref] = m.group(1) if m else 'F.Cu'
             e = self._courtyard(board_text, ref, cx, cy, f)
             # A courtyard is physical clearance; a keepout is electrical exclusion.
             # Some footprints draw the courtyard around BOTH, so an RF module's
@@ -174,7 +177,7 @@ class Layout:
         blk = board_text[f['start']:f['end'] + 1]
         at = re.search(r'\(at ([\d.-]+) ([\d.-]+)(?: ([\d.-]+))?\)', blk)
         fx, fy = float(at.group(1)), float(at.group(2))
-        rot = math.radians(float(at.group(3) or 0))
+        rot = math.radians(-float(at.group(3) or 0))   # Y-down: negate. See kicad_sexp.footprints.
         xs, ys = [], []
         def add(lx, ly):
             gx = fx + lx * math.cos(rot) - ly * math.sin(rot)
@@ -202,10 +205,51 @@ class Layout:
                     add(float(a), float(b))
         if xs:
             return (min(xs), max(xs), min(ys), max(ys))
-        pxs = [p['x'] - cx for p in f['pads']] or [0]
-        pys = [p['y'] - cy for p in f['pads']] or [0]
-        r = max((p['r'] for p in f['pads']), default=0.5)
-        return (min(pxs) - r - 0.4, max(pxs) + r + 0.4, min(pys) - r - 0.4, max(pys) + r + 0.4)
+
+        # No courtyard. Fall back to the Fab body outline before the pad bounding
+        # box, because the pad box is wrong in both directions on the footprints
+        # that most often lack a courtyard:
+        #   - a through-hole module with perimeter pins (an 8x8 LED matrix) has a
+        #     pad box SMALLER than its 32 x 32 mm body, so parts placed under the
+        #     body read as clear;
+        #   - a footprint with registration pads outside the functional area (the
+        #     SNES button: 10.6 x 9.95 mm of pads around a 5.0 x 4.3 mm contact
+        #     ring) has a pad box far LARGER than anything physical, so every
+        #     nearby passive reads as a collision and swamps the cost function.
+        # Fab is the component body by definition. Only take it when it is a real
+        # 2D region - some footprints draw a single Fab line, which is degenerate.
+        def body(layer_tag):
+            bxs, bys = [], []
+            for tag in ('fp_line', 'fp_rect', 'fp_poly', 'fp_circle', 'fp_arc'):
+                for st, en, sub in K.iter_blocks(blk, tag, top_level=False):
+                    if layer_tag not in sub:
+                        continue
+                    for a, b in re.findall(r'\((?:start|end|center|mid|xy) ([\d.-]+) ([\d.-]+)\)', sub):
+                        lx, ly = float(a), float(b)
+                        bxs.append(fx + lx * math.cos(rot) - ly * math.sin(rot) - cx)
+                        bys.append(fy + lx * math.sin(rot) + ly * math.cos(rot) - cy)
+            if bxs and (max(bxs) - min(bxs)) > 0.5 and (max(bys) - min(bys)) > 0.5:
+                return (min(bxs), max(bxs), min(bys), max(bys))
+            return None
+
+        for layer_tag in ('Fab', 'SilkS'):
+            e = body(layer_tag)
+            if e:
+                return e
+
+        # Each pad contributes its OWN half-size, not the largest pad's. Growing
+        # the whole box by max(r) makes a footprint with one big pad and many
+        # small ones enormous: the SNES button's 5.3 x 6.2 mm of real copper
+        # modelled as 10.3 x 9.7 mm, nearly 4x the area, which put every passive
+        # within 2 mm of a button into a phantom collision and left `overlap`
+        # dominating the cost function with a number that was not physical.
+        if not f['pads']:
+            return (-0.9, 0.9, -0.9, 0.9)
+        pad = 0.4
+        return (min(p['x'] - p['r'] for p in f['pads']) - cx - pad,
+                max(p['x'] + p['r'] for p in f['pads']) - cx + pad,
+                min(p['y'] - p['r'] for p in f['pads']) - cy - pad,
+                max(p['y'] + p['r'] for p in f['pads']) - cy + pad)
 
     def pad_xy(self, ref, pin):
         if ref not in self.pos:
@@ -254,6 +298,13 @@ class Layout:
             axc, ayc = self.pos[a]
             for b in refs[i + 1:]:
                 if a not in self.movable and b not in self.movable:
+                    continue
+                # Courtyard is a same-side clearance. A part on F.Cu cannot
+                # collide with one on B.Cu, and scoring the pair anyway is not a
+                # small error: on the SNES controller 21.4 of 22.1 mm2 of
+                # reported overlap was top-vs-bottom, so the term that is meant
+                # to guarantee legality was almost entirely fiction.
+                if self.side.get(a) != self.side.get(b):
                     continue
                 bx1, bx2, by1, by2 = self.extent[b]
                 bxc, byc = self.pos[b]

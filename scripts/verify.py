@@ -51,13 +51,35 @@ def check_net_sync(board_text, sch_path, results):
         for n in re.finditer(r'\(node\s+\(ref "([^"]+)"\)\s+\(pin "([^"]+)"\)', m.group(2)):
             sch[(n.group(1), n.group(2))] = m.group(1)
     board = K.net_map(board_text)
-    bad = [(k, board.get(k), v) for k, v in sch.items()
+
+    def same_net(b, s):
+        """Board and schematic net names, allowing for the sheet-path prefix.
+
+        A board stores the full hierarchical name ('/Root/CC1'); the exported
+        netlist may omit the root sheet ('/CC1'). Comparing the strings literally
+        reported 33 false failures on a board whose only real defect was 2 pads,
+        which buries the finding the check exists for. A path-suffix match keeps
+        the check honest: 'GND' vs 'Net-(U1-VSS-Pad35)' still fails.
+        """
+        if b == s:
+            return True
+        if b is None:
+            return False
+        b, s = str(b), str(s)
+        return (b.endswith('/' + s.lstrip('/')) or s.endswith('/' + b.lstrip('/'))) \
+            and b.rsplit('/', 1)[-1] == s.rsplit('/', 1)[-1]
+
+    raw = [(k, board.get(k), v) for k, v in sch.items()
            if board.get(k) != v and not str(board.get(k)).startswith('unconnected-')]
+    bad = [x for x in raw if not same_net(x[1], x[2])]
+    note = (f' ({len(raw) - len(bad)} sheet-path prefix difference(s) ignored)'
+            if len(raw) != len(bad) else '')
     if bad:
-        _fail(results, 'net-sync', f'{len(bad)} pad(s) on the wrong net',
+        _fail(results, 'net-sync', f'{len(bad)} pad(s) on the wrong net{note}',
               [f'{r}.{p}: board={b} schematic={s}' for (r, p), b, s in bad[:12]])
     else:
-        _pass(results, 'net-sync', f'{len(sch)} schematic nodes match {len(board)} board pads')
+        _pass(results, 'net-sync',
+              f'{len(sch)} schematic nodes match {len(board)} board pads{note}')
 
 
 # ---------------------------------------------------------------- keepouts

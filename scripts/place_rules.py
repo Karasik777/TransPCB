@@ -78,11 +78,41 @@ def centre(fp):
 
 
 def board_outline(text):
+    """Bounding box of Edge.Cuts, wherever it was drawn.
+
+    An outline is not always board-level graphics. The SNES controller board
+    inherited from upstream draws its whole 126 x 45 mm outline as 458 fp_line
+    segments inside a graphics-only footprint, so a board-level-only scan finds
+    nothing and every caller falls back to a phantom 100 x 100 mm board at the
+    origin - which puts every real part tens of mm "off board" at 1000/mm.
+    """
     xs, ys = [], []
-    for m in re.finditer(r'\(gr_(?:rect|line)\s*\(start ([\d.-]+) ([\d.-]+)\)\s*\(end ([\d.-]+) ([\d.-]+)\)', text):
-        if 'Edge.Cuts' in text[m.start():m.start() + 400]:
-            xs += [float(m.group(1)), float(m.group(3))]
-            ys += [float(m.group(2)), float(m.group(4))]
+
+    def add_block(blk, ox=0.0, oy=0.0, rot=0.0):
+        if '"Edge.Cuts"' not in blk and 'Edge.Cuts' not in blk:
+            return
+        cos_r, sin_r = math.cos(rot), math.sin(rot)
+        for a, b in re.findall(r'\((?:start|end|mid|center|xy) (-?[\d.]+) (-?[\d.]+)\)', blk):
+            lx, ly = float(a), float(b)
+            xs.append(ox + lx * cos_r - ly * sin_r)
+            ys.append(oy + lx * sin_r + ly * cos_r)
+
+    for tag in ('gr_rect', 'gr_line', 'gr_arc', 'gr_circle', 'gr_poly', 'gr_curve'):
+        for st, en, blk in K.iter_blocks(text, tag, top_level=False):
+            add_block(blk)
+
+    for fst, fen, fblk in K.iter_blocks(text, 'footprint', top_level=False):
+        if 'Edge.Cuts' not in fblk:
+            continue
+        at = re.search(r'\(at (-?[\d.]+) (-?[\d.]+)(?: (-?[\d.]+))?\)', fblk)
+        if not at:
+            continue
+        ox, oy = float(at.group(1)), float(at.group(2))
+        rot = math.radians(-float(at.group(3) or 0))   # Y-down: negate. See kicad_sexp.footprints.
+        for tag in ('fp_rect', 'fp_line', 'fp_arc', 'fp_circle', 'fp_poly'):
+            for st, en, blk in K.iter_blocks(fblk, tag, top_level=False):
+                add_block(blk, ox, oy, rot)
+
     return (min(xs), min(ys), max(xs), max(ys)) if xs else None
 
 

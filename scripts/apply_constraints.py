@@ -39,9 +39,18 @@ def ipc2221_width_mm(current_a: float, temp_rise_c: float, copper_oz: float,
 
 
 def resolve_widths(spec: dict) -> dict:
-    """Net class -> track width, deriving from current where given."""
+    """Net class -> track width, deriving from current where given.
+
+    The fab floor is a lower bound on what can be MANUFACTURED, never an
+    ampacity requirement. A 0.15 A rail needs 0.022 mm by IPC-2221 and gets
+    built at whatever the process minimum is, so a derived width below the
+    floor is clamped up to it - not rejected. Rejecting it made the schema's
+    own advice ("give a class a current, not a width") fail on every
+    low-current rail.
+    """
     st = spec.get('stackup', {})
     oz = st.get('copper_oz', 1.0)
+    floor = (spec.get('fab') or {}).get('min_track_mm', 0.0)
     out = {}
     for name, nc in (spec.get('net_classes') or {}).items():
         w = nc.get('track_mm')
@@ -49,7 +58,13 @@ def resolve_widths(spec: dict) -> dict:
             dt = nc.get('max_temp_rise_c', 10)
             need = ipc2221_width_mm(nc['current_a'], dt, oz)
             if w is None or need > w:
-                out[name] = {'width': need, 'why': f"IPC-2221: {nc['current_a']}A at dT={dt}C on {oz}oz"}
+                if need < floor:
+                    out[name] = {'width': floor,
+                                 'why': f"fab floor {floor} mm (IPC-2221 needs only {need} mm "
+                                        f"for {nc['current_a']}A at dT={dt}C on {oz}oz)"}
+                else:
+                    out[name] = {'width': need,
+                                 'why': f"IPC-2221: {nc['current_a']}A at dT={dt}C on {oz}oz"}
                 continue
             out[name] = {'width': w, 'why': f"declared (IPC-2221 needs only {need} mm)"}
         elif w:
