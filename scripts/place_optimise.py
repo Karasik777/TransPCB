@@ -52,6 +52,16 @@ class Layout:
         self.anchors = pl.get('anchors', DEFAULT_ANCHORS)
         self.radius = pl.get('move_radius_mm', 8.0)
         self.grid = pl.get('grid_mm', 0.25)
+        # Zero overlap costs zero, so the optimiser will happily pack parts until
+        # their courtyards touch exactly - which DRC then rounds into a violation.
+        # Inflate every courtyard by this margin so it leaves real breathing room.
+        self.margin = pl.get('overlap_margin_mm', 0.15)
+        # Parts that may translate along ONE axis only. A header pinned to a board
+        # edge can still slide along it, which frees the space beside a power pin
+        # without giving up edge access.
+        self.slide = pl.get('slide', {}) or {}
+        self.slide_edges = pl.get('slide_edge_anchors', True)
+        self.edge_tol = pl.get('edge_tolerance_mm', 3.0)
 
         self.fps = {f['ref']: f for f in K.footprints(board_text)}
         self.pin2net, self.net2pins = PR.schematic_nets(sch_path)
@@ -68,25 +78,90 @@ class Layout:
             self.pos[ref] = (cx, cy)
             self.local[ref] = [(p['num'], p['x'] - cx, p['y'] - cy, p['r'],
                                 self.pin2net.get((ref, p['num']))) for p in f['pads']]
-            self.extent[ref] = self._courtyard(board_text, ref, cx, cy, f)
+            e = self._courtyard(board_text, ref, cx, cy, f)
+            # A courtyard is physical clearance; a keepout is electrical exclusion.
+            # Some footprints draw the courtyard around BOTH, so an RF module's
+            # courtyard spans the whole antenna region and appears to collide with
+            # everything nearby. Clip such parts to their physical body - the
+            # keepout is already scored by its own cost term.
+            if 'keepout' in board_text[f['start']:f['end'] + 1] and f['pads']:
+                pr = max(p['r'] for p in f['pads'])
+                px = [p['x'] - cx for p in f['pads']]; py = [p['y'] - cy for p in f['pads']]
+                body = (min(px) - pr, max(px) + pr, min(py) - pr, max(py) + pr)
+                e = (max(e[0], body[0]), min(e[1], body[1]),
+                     max(e[2], body[2]), min(e[3], body[3]))
+            m = pl.get('overlap_margin_mm', 0.15)
+            self.extent[ref] = (e[0] - m, e[1] + m, e[2] - m, e[3] + m)
+        self.keepout_owners = {
+            f['ref'] for f in K.footprints(board_text)
+            if 'keepout' in board_text[f['start']:f['end'] + 1]}
         self.home = dict(self.pos)
-        self.movable = [r for r in self.fps if not glob_match(r, self.anchors)]
+        self.movable = [r for r in self.fps
+                        if not glob_match(r, self.anchors) or self.axis_of(r)]
+        self.slid = {r: self.axis_of(r) for r in self.movable if self.axis_of(r)}
         self.ics = [r for r in self.fps if r.startswith('U')]
 
-        # precompute: which IC pin does each decoupling cap serve?
-        self.decaps = []
-        for ref in self.fps:
-            if not ref.startswith('C'):
+        # Decoupling is scored per POWER PIN, not per capacitor.
+        #
+        # Scoring per capacitor lets every cap cluster around one convenient pin
+        # and report a perfect score while another pin is starved: on this board
+        # the ESP32's 3V3 pin sat 16 mm from its nearest cap while the model
+        # reported a near-zero violation. What matters is that each pin has a
+        # cap, and the distance is measured pad-to-pad on the rail - that is the
+        # actual trace length, and with the ground return it is the loop area.
+        self.pinsvc = []
+        for rail, pins in self.net2pins.items():
+            if not rail or not any(h in rail.upper() for h in PR.POWER_HINTS):
                 continue
-            nets = {n for _, _, _, _, n in self.local[ref]}
-            rails = [n for n in nets if n and any(h in n.upper() for h in PR.POWER_HINTS)]
-            if not (rails and 'GND' in nets):
+            caps = []
+            for r, cp in pins:
+                if not r.startswith('C'):
+                    continue
+                nets = {n for _, _, _, _, n in self.local.get(r, [])}
+                if 'GND' not in nets:
+                    continue
+                F = PR.cap_farads(self.vals.get(r, ''))
+                caps.append({'ref': r, 'pin': cp, 'bulk': bool(F and F >= 1e-6)})
+            if not caps:
                 continue
-            F = PR.cap_farads(self.vals.get(ref, ''))
-            targets = [(r, p) for r, p in self.net2pins.get(rails[0], []) if r in self.ics]
-            if targets:
-                self.decaps.append({'ref': ref, 'targets': targets,
-                                    'limit': self.lim['bulk'] if (F and F >= 1e-6) else self.lim['decap']})
+            for r, pn in pins:
+                if r in self.ics:
+                    self.pinsvc.append({'ic': r, 'pin': pn, 'rail': rail, 'caps': caps})
+
+    def axis_of(self, ref):
+        """'x', 'y' or None - which axis this part may slide along.
+
+        Explicit entries in `placement.slide` win. Otherwise, when
+        `slide_edge_anchors` is on (the default), an anchor that sits on a board
+        edge is given freedom to travel ALONG that edge.
+
+        The general problem this solves: a critical pin is starved because fixed
+        parts box in the space beside it. A connector is fixed for a physical
+        reason - it must stay reachable at the edge - but that reason constrains
+        one axis, not two. Pinning both is over-constraint, and it is what forced
+        the ESP32's 3V3 pin to sit 16 mm from its nearest capacitor.
+        """
+        import fnmatch
+        for pat, ax in self.slide.items():
+            if fnmatch.fnmatch(ref, pat):
+                return None if ax in (None, 'none', False) else ax
+        if not self.slide_edges or not glob_match(ref, self.anchors):
+            return None
+        # A part whose footprint declares a keepout defines a region other things
+        # must avoid. That region is anchored in board coordinates, so moving the
+        # part would silently decouple the two - the RF module and its antenna
+        # exclusion zone would drift apart. Such parts stay pinned.
+        if ref in self.keepout_owners:
+            return None
+        x1, y1, x2, y2 = self.outline
+        px, py = self.pos[ref]
+        e = self.extent[ref]
+        d = {'left': (px + e[0]) - x1, 'right': x2 - (px + e[1]),
+             'top': (py + e[2]) - y1, 'bottom': y2 - (py + e[3])}
+        side, gap = min(d.items(), key=lambda kv: kv[1])
+        if gap > self.edge_tol:
+            return None                       # not an edge part - stays pinned
+        return 'y' if side in ('left', 'right') else 'x'
 
     @staticmethod
     def _courtyard(board_text, ref, cx, cy, f):
@@ -155,13 +230,22 @@ class Layout:
             cx = sum(p[0] for p in pts) / len(pts); cy = sum(p[1] for p in pts) / len(pts)
             c['ratsnest_mm'] += sum(math.dist(p, (cx, cy)) for p in pts)
 
-        # decoupling: penalise every mm past the band limit
-        for d in self.decaps:
-            here = self.pos[d['ref']]
-            best = min((math.dist(here, xy) for r, p in d['targets']
-                        if (xy := self.pad_xy(r, p))), default=None)
-            if best and best > d['limit']:
-                c['decap_violation'] += best - d['limit']
+        # decoupling: every power pin must have a small cap close to it
+        for sv in self.pinsvc:
+            a = self.pad_xy(sv['ic'], sv['pin'])
+            if not a:
+                continue
+            small = [c2 for c2 in sv['caps'] if not c2['bulk']] or sv['caps']
+            d_small = min((math.dist(a, xy) for c2 in small
+                           if (xy := self.pad_xy(c2['ref'], c2['pin']))), default=None)
+            if d_small and d_small > self.lim['decap']:
+                c['decap_violation'] += d_small - self.lim['decap']
+            bulk = [c2 for c2 in sv['caps'] if c2['bulk']]
+            if bulk:
+                d_bulk = min((math.dist(a, xy) for c2 in bulk
+                              if (xy := self.pad_xy(c2['ref'], c2['pin']))), default=None)
+                if d_bulk and d_bulk > self.lim['bulk']:
+                    c['decap_violation'] += (d_bulk - self.lim['bulk']) * 0.3
 
         # courtyard overlap between movable parts and everything else
         refs = list(self.pos)
@@ -222,6 +306,56 @@ class Layout:
         return sum(d.get(k, 0) for k in self.HARD)
 
     # ---------------------------------------------------------------- search
+    def worst_pin(self, rnd):
+        """A power pin whose nearest small cap is beyond the limit, at random."""
+        bad = []
+        for sv in self.pinsvc:
+            a = self.pad_xy(sv['ic'], sv['pin'])
+            if not a:
+                continue
+            small = [c for c in sv['caps'] if not c['bulk']] or sv['caps']
+            hit = min(((math.dist(a, xy), c['ref']) for c in small
+                       if (xy := self.pad_xy(c['ref'], c['pin']))), default=None)
+            if hit and hit[0] > self.lim['decap']:
+                bad.append((hit[0] - self.lim['decap'], sv, hit[1], a))
+        return max(bad, key=lambda t: t[0])[1:] if bad else None
+
+    def relocate_candidates(self, target, ref, rnd, want=6):
+        """Legal spots for `ref` near `target`, nearest first."""
+        e = self.extent[ref]
+        x1, y1, x2, y2 = self.outline
+        found = []
+        for _ in range(240):
+            ang = rnd.uniform(0, 2 * math.pi)
+            rad = rnd.uniform(0.5, self.lim['decap'] * 1.6)
+            gx = round((target[0] + rad * math.cos(ang)) / self.grid) * self.grid
+            gy = round((target[1] + rad * math.sin(ang)) / self.grid) * self.grid
+            if gx + e[0] < x1 or gx + e[1] > x2 or gy + e[2] < y1 or gy + e[3] > y2:
+                continue
+            clash = False
+            for r2, (ox1, ox2, oy1, oy2) in self.extent.items():
+                if r2 == ref:
+                    continue
+                px, py = self.pos[r2]
+                if (min(gx + e[1], px + ox2) - max(gx + e[0], px + ox1) > 0 and
+                        min(gy + e[3], py + oy2) - max(gy + e[2], py + oy1) > 0):
+                    clash = True
+                    break
+            if clash:
+                continue
+            for ko in self.spec.get('keepouts') or []:
+                r0 = ko['rect']
+                if (min(gx + e[1], r0['x2']) - max(gx + e[0], r0['x1']) > 0 and
+                        min(gy + e[3], r0['y2']) - max(gy + e[2], r0['y1']) > 0):
+                    clash = True
+                    break
+            if not clash:
+                found.append((math.dist((gx, gy), target), gx, gy))
+                if len(found) >= want * 4:
+                    break
+        found.sort()
+        return [(x, y) for _, x, y in found[:want]]
+
     def anneal(self, iters=20000, seed=0, t0=None, verbose=True):
         rnd = random.Random(seed)
         if not self.movable:
@@ -234,11 +368,39 @@ class Layout:
         accepted = 0
         for i in range(iters):
             T = t0 * (1 - i / iters) ** 2 + 1e-6
+            # Domain move: relocate a capacitor straight to a starved power pin.
+            # A random walk never makes a 12 mm jump because every intermediate
+            # position is worse - so the optimiser plateaus with a pin unserved
+            # while legal spots beside it sit empty. This proposes the endpoint.
+            if rnd.random() < 0.18 and self.pinsvc:
+                w = self.worst_pin(rnd)
+                if w:
+                    sv, capref, target = w
+                    if capref in self.movable and not self.axis_of(capref):
+                        for gx, gy in self.relocate_candidates(target, capref, rnd):
+                            keep = self.pos[capref]
+                            self.pos[capref] = (gx, gy)
+                            new = self.cost()
+                            if self.illegal() > base_illegal + 1e-9:
+                                self.pos[capref] = keep
+                                continue
+                            if new < cur or rnd.random() < math.exp(-(new - cur) / T):
+                                cur = new
+                                accepted += 1
+                                if new < best:
+                                    best, best_pos = new, dict(self.pos)
+                                break
+                            self.pos[capref] = keep
+                    continue
+
             ref = rnd.choice(self.movable)
             old = self.pos[ref]
             if rnd.random() < 0.15 and len(self.movable) > 1:
                 # swap two same-prefix parts: escapes decap-ordering minima
-                cands = [r for r in self.movable if r[0] == ref[0] and r != ref]
+                if self.axis_of(ref):
+                    continue
+                cands = [r for r in self.movable
+                         if r[0] == ref[0] and r != ref and not self.axis_of(r)]
                 if not cands:
                     continue
                 other = rnd.choice(cands)
@@ -257,8 +419,9 @@ class Layout:
                 continue
             step = max(self.grid, self.radius * (1 - i / iters) * 0.5)
             hx, hy = self.home[ref]
-            nx = old[0] + rnd.uniform(-step, step)
-            ny = old[1] + rnd.uniform(-step, step)
+            ax = self.axis_of(ref)
+            nx = old[0] + (0 if ax == 'y' else rnd.uniform(-step, step))
+            ny = old[1] + (0 if ax == 'x' else rnd.uniform(-step, step))
             # stay within the allowed radius of where the user put it
             if math.dist((nx, ny), (hx, hy)) > self.radius:
                 continue

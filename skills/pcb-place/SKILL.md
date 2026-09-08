@@ -48,6 +48,42 @@ which it usually is. Weighted-only, the optimiser produced 21 DRC errors while
 reporting an overlap cost of 0.02 mm². The weights still report and rank; the
 hard check is what guarantees legality.
 
+## Decoupling is scored per power PIN, not per capacitor
+
+Scoring per capacitor lets every cap cluster around one convenient pin and report
+a perfect result while another pin is starved. On the example board the ESP32's
+3V3 pin sat **22 mm** from its nearest 100 nF while the model reported a
+near-zero violation, because all the caps were close to the regulator.
+
+Distances are measured **pad to pad on the rail** - that is the real trace
+length, and with the ground return it is the loop area that decides whether the
+cap does anything.
+
+## Freedoms are derived, not listed
+
+Over-constraining placement is what starves pins. Three rules, all automatic:
+
+- **An anchor on a board edge may slide ALONG that edge.** A connector is fixed
+  because it must stay reachable - that pins one axis, not two.
+  (`slide_edge_anchors`, on by default; override per part in `slide`.)
+- **A part that owns a footprint keepout stays pinned.** Its keepout is anchored
+  in board coordinates, so moving the part would silently decouple the two - an
+  RF module would drift away from its antenna exclusion zone.
+- **A keepout owner's courtyard is clipped to its physical body** for the overlap
+  test. Some footprints draw the courtyard around the keepout as well, so an RF
+  module appears to collide with everything nearby. Courtyard is physical
+  clearance; keepout is electrical exclusion. They are scored separately.
+
+## Targeted relocation
+
+A pure random walk never makes a 12 mm jump, because every intermediate position
+is worse - so the optimiser plateaus with a pin unserved while legal positions
+sit empty beside it. 18% of proposals instead pick the worst-served power pin and
+try moving a suitable capacitor **directly** to a legal spot next to it.
+
+That single operator took the example board's starved pin from 15.9 mm to
+**4.09 mm**, and the total decoupling violation from 43.6 mm to 7.9 mm.
+
 ## Why annealing
 
 The cost surface has many local minima - swapping two capacitors is a discrete
@@ -64,12 +100,14 @@ Against a hand-placed, hand-tuned layout:
 
 | | hand-placed | optimised |
 |---|---|---|
-| copper | 772.4 mm | **665.2 mm** |
-| vias | 92 | **39** |
+| copper | 772.4 mm | **661.0 mm** |
+| vias | 92 | **42** |
+| ESP32 3V3 pin to nearest 100nF | 22.00 mm | **4.09 mm** |
+| DRC after re-route | 0 | **0** |
 | placement score | 50/100 | **60/100** |
-| DRC after re-route | 0 | 1 courtyard overlap |
 
-Cost fell 48.9%: ratsnest 786 -> 671 mm, decoupling violation 16.97 -> 0.36 mm.
+USB pair skew moved 1.52 -> 2.89 mm, which is the one term that got worse.
+Report trades like that; do not bury them.
 
 ## Verify, always
 

@@ -9,7 +9,7 @@ went wrong. The [gotchas](docs/gotchas.md) are the actual value here: eight
 documented failures that no upstream tool warns you about, three of which were
 live on a board while KiCad DRC reported **zero errors**.
 
-![example board](examples/esp32c3-devboard/media/board.png)
+![TransPCB](docs/media/social-preview.png)
 
 ## What you get
 
