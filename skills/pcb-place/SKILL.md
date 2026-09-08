@@ -106,8 +106,8 @@ Against a hand-placed, hand-tuned layout:
 | DRC after re-route | 0 | **0** |
 | placement score | 50/100 | **60/100** |
 
-USB pair skew moved 1.52 -> 2.89 mm, which is the one term that got worse.
-Report trades like that; do not bury them.
+USB pair skew moved 1.52 -> 2.89 mm, the one term that got worse - it crosses
+the 2.5 mm check threshold. Report trades like that; do not bury them.
 
 ## Verify, always
 

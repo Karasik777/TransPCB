@@ -92,8 +92,16 @@ placement_band: rf            # lf | hf | rf - sets decoupling/crystal limits
 
 placement:
   anchors: ["U*", "J*", "H*", "MH*"]   # never moved: modules, connectors, mounts
+  # An anchor on a board edge is fixed for a physical reason - it must stay
+  # reachable - but that pins one axis, not two. These let it travel ALONG its
+  # edge, which frees space beside starved pins. Override per part in `slide`
+  # ('x', 'y', or 'none' to pin completely).
+  slide_edge_anchors: true
+  edge_tolerance_mm: 3.0
+  slide: {}
   move_radius_mm: 8.0                  # how far a part may stray from where you put it
   grid_mm: 0.25
+  overlap_margin_mm: 0.15              # inflate courtyards so parts don't pack edge-to-edge
 
 # Cost = weighted sum of these terms. Raise a weight to make the optimiser care
 # more about it. Overlap and keepout are deliberately near-fatal.

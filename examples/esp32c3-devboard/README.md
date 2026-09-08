@@ -45,6 +45,20 @@ browser; some image viewers show only the first frame.
 
 **0 DRC errors, 0 unconnected pads.** 5 of 6 TransPCB checks pass.
 
+Placement was refined by `place_optimise.py` (simulated annealing) and fully
+re-routed. Against the hand-placed original:
+
+| | hand-placed | optimised |
+|---|---|---|
+| copper | 772.4 mm | **661.0 mm** |
+| vias | 92 | **42** |
+| ESP32 3V3 pin to nearest 100 nF | 22.00 mm | **4.09 mm** |
+| DRC errors | 0 | **0** |
+
+That last row is the one that matters: decoupling 22 mm from the pin it serves
+is ornamental. It also drove four fixes in the optimiser - see the
+`pcb-place` skill.
+
 Routed with the two-stage flow - `route_diff.py` for the USB pair first, then
 `route.py` for the rest. Pair skew: connector side 7.39 -> 3.26 mm, MCU side
 13.42 -> 5.16 mm against a single-ended first attempt.
@@ -57,13 +71,14 @@ because U1's own pads sit at y=62.0 and a 0.4 mm track reaching them spans
 
 ### The one accepted failure
 
-`diffpair:USB` - `USB_DM` carries 3 vias to `USB_DP`'s 0. Asymmetric vias convert
-differential to common mode, the main radiated-emissions driver on USB. Every
-attempt to remove them was **rejected by the router's own improvement gate**:
-`USB_DM` has to reach TP4 and J3's second pad row, and that needs layer changes
-given this placement.
+`diffpair:USB` - copper skew **2.89 mm** against a 2.5 mm threshold
+(`USB_DP` 85.19 mm / 2 vias, `USB_DM` 82.29 mm / 4 vias).
 
-Harmless at 12 Mbps full-speed, which is what the C3's native USB runs. It would
-matter at high speed or in EMC testing. Fixing it properly means moving TP4 and
-the ESD part, not re-routing - which is exactly the kind of problem
-`place_rules.py` and the placement optimiser are for.
+This is the term that regressed when placement was optimised for decoupling:
+skew was 1.52 mm before. A deliberate trade, and the right one here - at 12 Mbps
+full-speed a bit period is 83 ns, and 2.9 mm of FR4 is roughly 19 ps, under
+0.03% of a bit. USB 2.0 full speed also has no impedance-matching requirement;
+that begins at high speed, 480 Mbps.
+
+It would matter on a faster interface or in EMC testing. Fixing it properly
+means placement work around TP3/TP4 and the ESD part, not re-routing.

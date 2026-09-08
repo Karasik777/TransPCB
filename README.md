@@ -26,8 +26,8 @@ live on a board while KiCad DRC reported **zero errors**.
   decap ordering, connector edge access, crystal proximity and keepouts — with
   thresholds that tighten by frequency band
 - **A placement optimiser** — simulated annealing against a tunable cost
-  function. On the example board it cut copper 772→665 mm and vias 92→39
-  against a hand-tuned layout
+  function. On the example board it cut copper 772→661 mm, vias 92→42, and
+  moved the ESP32's decoupling cap from 22 mm to 4 mm from the pin it serves
 - **Current-aware track widths** (IPC-2221) and a stackup gate, so an impedance
   target either uses your real stack or refuses to run
 - **A fab package** gated on clean DRC — gerbers, drill, BOM, JLCPCB CPL
