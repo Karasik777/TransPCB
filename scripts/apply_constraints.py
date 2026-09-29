@@ -134,6 +134,15 @@ def router_flags(spec: dict, stage: str = 'single') -> list[str]:
          '--via-size', str(d['via']['size_mm']),
          '--via-drill', str(d['via']['drill_mm']),
          '--layers'] + spec['board']['layers']
+    # The fab floors the router can actually honour. Without these it uses its
+    # own defaults (0.2 mm edge, 0.2 mm hole-to-hole) no matter what the spec
+    # says, so a value that reaches KiCad's rules and the verifier never reaches
+    # the copper: on the SNES controller that produced 112 copper_edge_clearance
+    # errors from tracks laid against a 0.50 mm declared edge keepout.
+    if fab.get('min_edge_clearance_mm'):
+        f += ['--board-edge-clearance', str(fab['min_edge_clearance_mm'])]
+    if fab.get('min_hole_to_hole_mm'):
+        f += ['--hole-to-hole-clearance', str(fab['min_hole_to_hole_mm'])]
     if b.get('heuristic_weight'):
         f += ['--heuristic-weight', str(b['heuristic_weight'])]
     # Via budget -> cost weight. Default 75 = 5mm of path; tighten it when the
